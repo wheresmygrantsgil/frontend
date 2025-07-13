@@ -64,9 +64,44 @@ function selectResearcher(name) {
   showGrants(name);
 }
 
-function formatDate(d) {
-  if (Array.isArray(d)) return d[0];
-  return d;
+function parseDates(raw) {
+  if (raw === null || raw === undefined) return [];
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        return JSON.parse(trimmed.replace(/'/g, '"'));
+      } catch (e) {
+        return [trimmed];
+      }
+    }
+    return [trimmed];
+  }
+  return [String(raw)];
+}
+
+function prettyDate(str) {
+  const [datePart, timePartRaw = ''] = str.split(' ');
+  const timePart = timePartRaw.slice(0, 5); // HH:MM
+  let day, month, year;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+    [year, month, day] = datePart.split('-');
+  } else if (/^\d{2}-\d{2}-\d{4}$/.test(datePart)) {
+    [day, month, year] = datePart.split('-');
+  } else {
+    return str;
+  }
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${day} ${months[Number(month) - 1]} ${year}${timePart ? ' ' + timePart : ''}`;
+}
+
+function formatDate(raw) {
+  return parseDates(raw).map(prettyDate).join('<br>');
+}
+
+function dueDateLabel(raw) {
+  return parseDates(raw).length > 1 ? 'Due Dates:' : 'Due Date:';
 }
 
 function moneyFmt(m) {
@@ -81,7 +116,7 @@ function createGrantCard(grant) {
   card.innerHTML = `
       <h3>${grant.title}</h3>
       <p><strong>Provider:</strong> ${grant.provider}</p>
-      <p><strong>Due Date:</strong> ${formatDate(grant.due_date)}</p>
+      <p><strong>${dueDateLabel(grant.due_date)}</strong> ${formatDate(grant.due_date)}</p>
       <p><strong>Proposed Money:</strong> ${moneyFmt(grant.proposed_money)}</p>
       <p><a href="${grant.submission_link}" target="_blank" rel="noopener">Submission Link ↗</a></p>
     `;
