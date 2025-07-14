@@ -374,3 +374,47 @@ footer .linkedin:hover { transform: scale(1.15); }
 @keyframes fadeUp {
   to { opacity: 1; transform: none; }
 }
+
+/* ======== Grants table ======== */
+#tab-grants {
+  max-width: 95%;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.table-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.table-controls input[type="search"] {
+  flex: 1 1 200px;
+  padding: 0.4rem 0.6rem;
+  border: 2px solid var(--primary);
+  border-radius: 6px;
+}
+
+.table-controls button {
+  background: var(--accent);
+  border: none;
+  color: #fff;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dt-buttons .dt-button {
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  margin-right: 0.3rem;
+}
+
+.dataTables_wrapper .dataTables_filter {
+  display: none; /* hide default search */
+}

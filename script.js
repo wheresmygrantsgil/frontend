@@ -3,6 +3,7 @@ let grantsData = [];
 let researcherNames = [];
 let providerChart;
 let deadlineChart;
+let grantsTable;
 
 function showLandingWizard() {
   const container = document.getElementById('grants');
@@ -258,21 +259,33 @@ function showDashboard() {
 function showTab(name) {
   const rec = document.getElementById('recommendations');
   const dash = document.getElementById('dashboard');
+  const grantsSec = document.getElementById('tab-grants');
   const recTab = document.getElementById('tab-recommendations');
+  const grantsTab = document.getElementById('tab-grants-btn');
   const statTab = document.getElementById('tab-stats');
+
+  const allSecs = [rec, dash, grantsSec];
+  const allTabs = [recTab, grantsTab, statTab];
+  allSecs.forEach(sec => sec.classList.add('hidden'));
+  allTabs.forEach(btn => {
+    btn.classList.remove('active');
+    btn.setAttribute('aria-selected', 'false');
+  });
 
   if (name === 'stats') {
     dash.classList.remove('hidden');
-    rec.classList.add('hidden');
-    recTab.classList.remove('active');
     statTab.classList.add('active');
-    // Wait until the section is visible so Chart.js can size canvases correctly
+    statTab.setAttribute('aria-selected', 'true');
     requestAnimationFrame(showDashboard);
+  } else if (name === 'grants') {
+    grantsSec.classList.remove('hidden');
+    grantsTab.classList.add('active');
+    grantsTab.setAttribute('aria-selected', 'true');
+    if (!grantsTable) initGrantsTable();
   } else {
-    dash.classList.add('hidden');
     rec.classList.remove('hidden');
     recTab.classList.add('active');
-    statTab.classList.remove('active');
+    recTab.setAttribute('aria-selected', 'true');
   }
 }
 
@@ -294,12 +307,81 @@ function showGrants(name) {
   );
 }
 
+function initGrantsTable() {
+  const rows = grantsData.map(g => ({
+    grant_id: g.grant_id,
+    provider: g.provider,
+    title: g.title,
+    due_date: formatDate(g.due_date),
+    eligibility: g.eligibility_israel ? 'Yes' : 'No',
+    money: g.proposed_money,
+    link: g.submission_link,
+  }));
+
+  grantsTable = $('#grants-table').DataTable({
+    data: rows,
+    responsive: true,
+    colReorder: true,
+    dom: 'Bfrtip',
+    searchHighlight: true,
+    buttons: [
+      { extend: 'csvHtml5', text: 'CSV', exportOptions: { columns: ':visible' }, title: 'grants', filename: 'grants', className: 'export-csv' },
+      { extend: 'excelHtml5', text: 'Excel', exportOptions: { columns: ':visible' }, title: 'grants', filename: 'grants', className: 'export-xlsx' },
+      'colvis'
+    ],
+    columns: [
+      { data: 'grant_id', title: 'ID' },
+      { data: 'provider', title: 'Provider' },
+      { data: 'title', title: 'Title' },
+      { data: 'due_date', title: 'Due Date' },
+      { data: 'eligibility', title: 'IL Eligible' },
+      { data: 'money', title: 'Money' },
+      { data: 'link', title: 'Link', orderable: false, render: d => `<a href="${d}" target="_blank" rel="noopener">Open</a>` },
+    ]
+  });
+
+  $('#grant-global-search').on('input', function(){
+    grantsTable.search(this.value).draw();
+  });
+
+  // Range filters
+  $.fn.dataTable.ext.search.push(function(settings, data) {
+    if(settings.nTable.id !== 'grants-table') return true;
+
+    const moneyColIdx = settings.aoColumns.findIndex(c => c.data === 'money');
+    const dateColIdx = settings.aoColumns.findIndex(c => c.data === 'due_date');
+
+    const moneyMin = parseFloat($('#money-min').val()) || -Infinity;
+    const moneyMax = parseFloat($('#money-max').val()) || Infinity;
+    const money = parseFloat(data[moneyColIdx]) || 0;
+    if(money < moneyMin || money > moneyMax) return false;
+
+    const dMin = $('#date-min').val() ? new Date($('#date-min').val()) : null;
+    const dMax = $('#date-max').val() ? new Date($('#date-max').val()) : null;
+
+    // Use only the first date for filtering when multiple are present
+    const dateStr = data[dateColIdx].split(' / ')[0];
+    if (!dateStr) return true; // Don't filter out rows with no due date
+    const due = new Date(dateStr);
+
+    if ((dMin && due < dMin) || (dMax && due > dMax)) return false;
+
+    return true;
+  });
+
+  $('#money-min,#money-max,#date-min,#date-max').on('change', () => grantsTable.draw());
+
+  $('#export-csv').on('click', () => grantsTable.button('.export-csv').trigger());
+  $('#export-xlsx').on('click', () => grantsTable.button('.export-xlsx').trigger());
+}
+
 async function init() {
   await loadData();
 
   showLandingWizard();
 
   document.getElementById('tab-recommendations').addEventListener('click', () => showTab('recommendations'));
+  document.getElementById('tab-grants-btn').addEventListener('click', () => showTab('grants'));
   document.getElementById('tab-stats').addEventListener('click', () => showTab('stats'));
 
   const input = document.getElementById('researcher-input');

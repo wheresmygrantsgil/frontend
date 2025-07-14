@@ -10,16 +10,21 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css" />
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.1/css/buttons.dataTables.min.css" />
+    <link rel="stylesheet" href="https://cdn.datatables.net/colreorder/1.6.2/css/colReorder.dataTables.min.css" />
+    <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.dataTables.min.css" />
   </head>
   <body>
     <header>
       <h1>Grant Matcher for Haifa University</h1>
-      <nav class="tabs">
-        <button id="tab-recommendations" class="tab active">Recommendations</button>
-        <button id="tab-stats" class="tab">Statistics</button>
+      <nav class="tabs" role="tablist">
+        <button id="tab-recommendations" class="tab active" role="tab" aria-selected="true" aria-controls="recommendations">Recommendations</button>
+        <button id="tab-grants-btn" class="tab" role="tab" aria-selected="false" aria-controls="tab-grants">Grants</button>
+        <button id="tab-stats" class="tab" role="tab" aria-selected="false" aria-controls="dashboard">Statistics</button>
       </nav>
     </header>
-    <section id="dashboard" class="dashboard hidden">
+    <section id="dashboard" class="dashboard hidden" role="tabpanel" aria-labelledby="tab-stats">
       <div class="stats-dashboard">
         <div class="stat">
           <span id="grant-count" class="stat-number"></span>
@@ -40,7 +45,26 @@
       </div>
     </section>
 
-    <main id="recommendations">
+    <section id="tab-grants" class="hidden" role="tabpanel" aria-labelledby="tab-grants-btn">
+      <div class="table-controls">
+        <input type="search" id="grant-global-search" placeholder="Search..." />
+        <div class="range-filters">
+          <label>Money
+            <input type="number" id="money-min" placeholder="Min" />
+            <input type="number" id="money-max" placeholder="Max" />
+          </label>
+          <label>Due Date
+            <input type="date" id="date-min" />
+            <input type="date" id="date-max" />
+          </label>
+        </div>
+        <button id="export-csv">Export CSV</button>
+        <button id="export-xlsx">Export Excel</button>
+      </div>
+      <table id="grants-table" class="display" style="width:100%"></table>
+    </section>
+
+    <main id="recommendations" role="tabpanel" aria-labelledby="tab-recommendations">
       <div class="selector">
         <label for="researcher-input">Find your name</label>
         <div class="input-wrapper">
@@ -74,6 +98,16 @@
       </a>
     </footer>
 
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.1/js/buttons.colVis.min.js"></script>
+    <script src="https://cdn.datatables.net/colreorder/1.6.2/js/dataTables.colReorder.min.js"></script>
+    <script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mark.js/8.11.1/jquery.mark.min.js"></script>
+    <script src="https://cdn.datatables.net/plug-ins/1.13.6/features/mark.js/datatables.mark.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="script.js"></script>
     <script src="teaser.js"></script>
