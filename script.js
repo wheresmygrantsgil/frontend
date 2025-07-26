@@ -7,6 +7,9 @@ let providerChart;
 let deadlineChart;
 let grantsTable;
 
+// TODO: replace 'anon' with real user id from auth cookie when available
+const CURRENT_USER = 'anon';
+
 // ---------- Google Analytics event helper ----------
 function track(eventName, params = {}) {
   try {
@@ -149,6 +152,8 @@ function createGrantCard(grant, matchReason = null) {
       provider: grant.provider
     })
   );
+
+  renderVoteBar(card, grant.grant_id);
 
   // Summary toggle
   const btn = document.createElement('button');
@@ -482,3 +487,173 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ===== Voting module =====
+const API_BASE = 'https://ggm-backend.onrender.com';
+
+function apiFetch(path, options = {}) {
+  return fetch(`${API_BASE}${path}`, options);
+}
+
+const api = {
+  summary: (id) => apiFetch(`/votes/summary/${id}`).then(r => r.json()),
+  userVote: (id, user) => apiFetch(`/votes/user/${id}/${user}`).then(r => r.json()),
+  postVote: (id, type) => apiFetch('/vote', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ grant_id: id, type })
+  }),
+  deleteVote: (id) => apiFetch(`/vote/${id}`, { method: 'DELETE' })
+};
+
+function updateVoteUI(bar) {
+  const { likes, dislikes, userVote } = bar.state;
+  const likeBtn = bar.querySelector('.like-btn');
+  const dislikeBtn = bar.querySelector('.dislike-btn');
+  const likeCount = bar.querySelector('.like-count');
+  const dislikeCount = bar.querySelector('.dislike-count');
+
+  likeBtn.classList.toggle('liked', userVote === 'like');
+  dislikeBtn.classList.toggle('disliked', userVote === 'dislike');
+  likeBtn.setAttribute('aria-pressed', userVote === 'like');
+  dislikeBtn.setAttribute('aria-pressed', userVote === 'dislike');
+
+  likeCount.textContent = likes > 0 ? likes : '';
+  dislikeCount.textContent = dislikes > 0 ? dislikes : '';
+}
+
+function renderVoteBar(cardEl, grantId) {
+  const bar = document.createElement('div');
+  bar.className = 'vote-bar';
+
+  const likeBtn = document.createElement('button');
+  likeBtn.className = 'vote-btn like-btn';
+  likeBtn.dataset.id = grantId;
+  likeBtn.setAttribute('aria-label', 'Like grant');
+  likeBtn.setAttribute('aria-pressed', 'false');
+  likeBtn.tabIndex = 0;
+
+  const likeCount = document.createElement('span');
+  likeCount.className = 'count like-count';
+
+  const dislikeBtn = document.createElement('button');
+  dislikeBtn.className = 'vote-btn dislike-btn';
+  dislikeBtn.dataset.id = grantId;
+  dislikeBtn.setAttribute('aria-label', 'Dislike grant');
+  dislikeBtn.setAttribute('aria-pressed', 'false');
+  dislikeBtn.tabIndex = 0;
+
+  const dislikeCount = document.createElement('span');
+  dislikeCount.className = 'count dislike-count';
+
+  likeBtn.addEventListener('click', handleVoteClick);
+  dislikeBtn.addEventListener('click', handleVoteClick);
+  likeBtn.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      likeBtn.click();
+    }
+  });
+  dislikeBtn.addEventListener('keydown', (e) => {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      dislikeBtn.click();
+    }
+  });
+
+  bar.appendChild(likeBtn);
+  bar.appendChild(likeCount);
+  bar.appendChild(dislikeBtn);
+  bar.appendChild(dislikeCount);
+
+  bar.state = { grantId, likes: 0, dislikes: 0, userVote: null };
+
+  cardEl.querySelector('h3').after(bar);
+
+  Promise.all([
+    api.summary(grantId),
+    api.userVote(grantId, CURRENT_USER)
+  ]).then(([counts, user]) => {
+    if (counts) {
+      bar.state.likes = counts.likes || 0;
+      bar.state.dislikes = counts.dislikes || 0;
+    }
+    if (user && (user.vote === 'like' || user.vote === 'dislike')) {
+      bar.state.userVote = user.vote;
+    }
+    updateVoteUI(bar);
+  }).catch(() => {
+    updateVoteUI(bar);
+  });
+}
+
+async function handleVoteClick(e) {
+  const btn = e.currentTarget;
+  const bar = btn.closest('.vote-bar');
+  if (bar.debounce) return;
+  bar.debounce = true;
+  setTimeout(() => { bar.debounce = false; }, 300);
+
+  const isLike = btn.classList.contains('like-btn');
+  const state = bar.state;
+  const prev = { ...state };
+
+  if (isLike) {
+    if (state.userVote === 'like') {
+      state.userVote = null;
+      state.likes = Math.max(0, state.likes - 1);
+      updateVoteUI(bar);
+      track('vote_remove', { grant_id: state.grantId });
+      const res = await api.deleteVote(state.grantId);
+      if (!res.ok) {
+        Object.assign(state, prev);
+        updateVoteUI(bar);
+        alert("Couldn't register vote – please try again.");
+      }
+      return;
+    }
+
+    if (state.userVote === 'dislike') {
+      state.dislikes = Math.max(0, state.dislikes - 1);
+    }
+    state.userVote = 'like';
+    state.likes += 1;
+    updateVoteUI(bar);
+    track('vote_like', { grant_id: state.grantId });
+    const res = await api.postVote(state.grantId, 'like');
+    if (!res.ok) {
+      Object.assign(state, prev);
+      updateVoteUI(bar);
+      alert("Couldn't register vote – please try again.");
+    }
+  } else {
+    if (state.userVote === 'dislike') {
+      state.userVote = null;
+      state.dislikes = Math.max(0, state.dislikes - 1);
+      updateVoteUI(bar);
+      track('vote_remove', { grant_id: state.grantId });
+      const res = await api.deleteVote(state.grantId);
+      if (!res.ok) {
+        Object.assign(state, prev);
+        updateVoteUI(bar);
+        alert("Couldn't register vote – please try again.");
+      }
+      return;
+    }
+
+    if (state.userVote === 'like') {
+      state.likes = Math.max(0, state.likes - 1);
+    }
+    state.userVote = 'dislike';
+    state.dislikes += 1;
+    updateVoteUI(bar);
+    track('vote_dislike', { grant_id: state.grantId });
+    const res = await api.postVote(state.grantId, 'dislike');
+    if (!res.ok) {
+      Object.assign(state, prev);
+      updateVoteUI(bar);
+      alert("Couldn't register vote – please try again.");
+    }
+  }
+}
+
