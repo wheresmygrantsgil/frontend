@@ -6,6 +6,8 @@ let researcherNames = [];
 let providerChart;
 let deadlineChart;
 let grantsTable;
+let currentResearcher = null;
+const API_BASE = 'https://ggm-backend.onrender.com';
 
 // ---------- Google Analytics event helper ----------
 function track(eventName, params = {}) {
@@ -24,6 +26,7 @@ function showLandingWizard() {
     <div class="landing-wizard">
       <img src="assets/wizardoc.png" alt="Cartoon robot scanning grant proposals">
     </div>`;
+  currentResearcher = null;
 }
 
 async function loadData() {
@@ -85,6 +88,7 @@ function updateSuggestions(value) {
 function selectResearcher(name) {
   document.getElementById('researcher-input').value = name;
   document.getElementById('suggestions').style.display = 'none';
+  currentResearcher = name;
   showGrants(name);
   track('select_researcher', { researcher_name: name });
 }
@@ -186,8 +190,102 @@ function createGrantCard(grant, matchReason = null) {
 
   card.appendChild(btn);
   card.appendChild(summary);
+  const voteSec = createVoteSection(grant.grant_id);
+  card.appendChild(voteSec);
 
   return card;
+}
+
+function createVoteSection(grantId) {
+  const container = document.createElement('div');
+  container.className = 'vote-section';
+
+  const likeBtn = document.createElement('button');
+  likeBtn.className = 'vote-btn';
+  likeBtn.innerHTML = `👍 <span class="count">0</span>`;
+
+  const dislikeBtn = document.createElement('button');
+  dislikeBtn.className = 'vote-btn';
+  dislikeBtn.innerHTML = `👎 <span class="count">0</span>`;
+
+  const msg = document.createElement('div');
+  msg.className = 'vote-msg';
+  msg.style.display = 'none';
+
+  container.appendChild(likeBtn);
+  container.appendChild(dislikeBtn);
+  container.appendChild(msg);
+
+  likeBtn.addEventListener('click', () => handleVote(container, grantId, 'like'));
+  dislikeBtn.addEventListener('click', () => handleVote(container, grantId, 'dislike'));
+
+  updateVoteSection(container, grantId);
+  return container;
+}
+
+async function updateVoteSection(container, grantId) {
+  try {
+    const totals = await fetchJSON(`${API_BASE}/votes/${grantId}`);
+    container.querySelectorAll('.count')[0].textContent = totals.likes ?? 0;
+    container.querySelectorAll('.count')[1].textContent = totals.dislikes ?? 0;
+  } catch (e) {}
+
+  if (!currentResearcher) return;
+  try {
+    const vote = await fetchJSON(`${API_BASE}/vote/${grantId}/${encodeURIComponent(currentResearcher)}`);
+    container.dataset.userVote = vote.action;
+    setVoteButtons(container, vote.action);
+  } catch {
+    container.dataset.userVote = '';
+    setVoteButtons(container, null);
+  }
+}
+
+function setVoteButtons(container, action) {
+  const [likeBtn, dislikeBtn] = container.querySelectorAll('.vote-btn');
+  likeBtn.classList.toggle('active-like', action === 'like');
+  dislikeBtn.classList.toggle('active-dislike', action === 'dislike');
+}
+
+async function handleVote(container, grantId, action) {
+  if (!currentResearcher) return;
+  let url;
+  let opts;
+  const current = container.dataset.userVote;
+  if (current === action) {
+    url = `${API_BASE}/vote/${grantId}/${encodeURIComponent(currentResearcher)}`;
+    opts = { method: 'DELETE' };
+  } else {
+    url = `${API_BASE}/vote`;
+    opts = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ grant_id: grantId, researcher_id: currentResearcher, action }),
+    };
+  }
+
+  try {
+    await fetchJSON(url, opts);
+    await updateVoteSection(container, grantId);
+  } catch (e) {
+    if (e.status === 429) {
+      const msg = container.querySelector('.vote-msg');
+      msg.textContent = 'Slow down';
+      msg.style.display = 'block';
+      setTimeout(() => (msg.style.display = 'none'), 2000);
+    }
+  }
+}
+
+async function fetchJSON(url, opts = {}) {
+  const resp = await fetch(url, opts);
+  if (resp.status === 429) {
+    const err = new Error('rate');
+    err.status = 429;
+    throw err;
+  }
+  if (!resp.ok) throw new Error('http');
+  return resp.json();
 }
 
 function parseDueDate(raw) {
@@ -334,6 +432,46 @@ function showDashboard() {
   });
 }
 
+function timeAgo(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  if (isNaN(diff)) return '';
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s} seconds ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+async function loadHealth() {
+  const box = document.getElementById('health-widget');
+  if (!box) return;
+  box.textContent = 'Loading...';
+  try {
+    const data = await fetchJSON(`${API_BASE}/health`);
+    renderHealth(box, data);
+  } catch (e) {
+    box.textContent = e.status === 429 ? 'Slow down' : 'Error loading stats';
+  }
+}
+
+function renderHealth(box, data) {
+  const total = data.total_votes ?? data.votes ?? 0;
+  const grants = data.unique_grants ?? data.grants ?? 0;
+  const researchers = data.unique_researchers ?? data.researchers ?? 0;
+  const top = data.top_grant || {};
+  const last = data.last_vote || data.last;
+  const topText = top.grant_id
+    ? `Top ${top.grant_id} (${top.likes || 0}👍/${top.dislikes || 0}👎)`
+    : '';
+  const lastText = last ? `Last vote ${timeAgo(last)}` : '';
+  box.innerHTML = `<strong>${total}</strong> total votes · <strong>${grants}</strong> grants · <strong>${researchers}</strong> researchers${
+    topText ? ` · ${topText}` : ''
+  }${lastText ? ` · ${lastText}` : ''}`;
+}
+
 function showTab(name) {
   const rec = document.getElementById('recommendations');
   const dash = document.getElementById('dashboard');
@@ -459,6 +597,8 @@ async function init() {
   await loadData();
 
   showLandingWizard();
+  loadHealth();
+  setInterval(loadHealth, 60000);
 
   document.getElementById('tab-recommendations').addEventListener('click', () => showTab('recommendations'));
   document.getElementById('tab-grants-btn').addEventListener('click', () => showTab('grants'));
