@@ -426,3 +426,51 @@ footer .linkedin:hover { transform: scale(1.15); }
 .dataTables_wrapper .dataTables_filter {
   display: none; /* hide default search */
 }
+/* ====== Voting controls ====== */
+.vote-controls {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  align-items: center;
+}
+.vote-controls button {
+  background: #ffffff;
+  border: 2px solid var(--primary);
+  color: var(--primary);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+.vote-controls button.active-like {
+  background: #3aae4b;
+  border-color: #3aae4b;
+  color: #ffffff;
+}
+.vote-controls button.active-dislike {
+  background: #d64541;
+  border-color: #d64541;
+  color: #ffffff;
+}
+.vote-controls .vote-message {
+  margin-left: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--primary);
+}
+
+/* ====== Health widget ====== */
+.health-widget {
+  background: #ffffff;
+  border: 2px solid var(--primary);
+  border-left: 6px solid var(--accent);
+  border-radius: 14px;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+  max-width: 600px;
+  margin: 1rem auto;
+  padding: 0.5rem 1rem;
+  text-align: center;
+  font-size: 0.95rem;
+}

@@ -6,6 +6,8 @@ let researcherNames = [];
 let providerChart;
 let deadlineChart;
 let grantsTable;
+let currentResearcher = null;
+const API_BASE = "https://ggm-backend.onrender.com";
 
 // ---------- Google Analytics event helper ----------
 function track(eventName, params = {}) {
@@ -184,6 +186,16 @@ function createGrantCard(grant, matchReason = null) {
     card.appendChild(reason);
   }
 
+  const voteBox = document.createElement('div');
+  voteBox.className = 'vote-controls';
+  voteBox.innerHTML = `
+    <button class="like-btn" aria-label="Like">👍 <span class="count">0</span></button>
+    <button class="dislike-btn" aria-label="Dislike">👎 <span class="count">0</span></button>
+    <span class="vote-message" aria-live="polite"></span>
+  `;
+
+  card.appendChild(voteBox);
+
   card.appendChild(btn);
   card.appendChild(summary);
 
@@ -211,6 +223,76 @@ function parseDueDate(raw) {
     [dd, mm, yyyy] = datePart.split('-');
   }
   return new Date(`${yyyy}-${mm}-${dd}T${timePart}Z`);
+}
+
+function setupVoting(card, grantId) {
+  const likeBtn = card.querySelector('.like-btn');
+  const dislikeBtn = card.querySelector('.dislike-btn');
+  const likeCount = likeBtn.querySelector('.count');
+  const dislikeCount = dislikeBtn.querySelector('.count');
+  const msg = card.querySelector('.vote-message');
+  let userVote = null;
+
+  async function refreshCounts() {
+    try {
+      const resp = await fetch(`${API_BASE}/votes/${grantId}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        likeCount.textContent = data.likes ?? 0;
+        dislikeCount.textContent = data.dislikes ?? 0;
+      }
+    } catch {}
+  }
+
+  async function refreshUser() {
+    if (!currentResearcher) return;
+    try {
+      const resp = await fetch(`${API_BASE}/vote/${grantId}/${encodeURIComponent(currentResearcher)}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        userVote = data.action;
+      } else {
+        userVote = null;
+      }
+    } catch {
+      userVote = null;
+    }
+    applyState();
+  }
+
+  function applyState() {
+    likeBtn.classList.toggle('active-like', userVote === 'like');
+    dislikeBtn.classList.toggle('active-dislike', userVote === 'dislike');
+  }
+
+  async function send(action) {
+    if (!currentResearcher) return;
+    try {
+      let resp;
+      if (userVote === action) {
+        resp = await fetch(`${API_BASE}/vote/${grantId}/${encodeURIComponent(currentResearcher)}`, { method: 'DELETE' });
+        if (resp.ok) userVote = null;
+      } else {
+        resp = await fetch(`${API_BASE}/vote`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ grant_id: grantId, researcher_id: currentResearcher, action })
+        });
+        if (resp.ok) userVote = action;
+      }
+      if (resp && resp.status === 429) {
+        msg.textContent = 'Slow down';
+        setTimeout(() => (msg.textContent = ''), 2000);
+      }
+    } catch {}
+    applyState();
+    refreshCounts();
+  }
+
+  likeBtn.addEventListener('click', () => send('like'));
+  dislikeBtn.addEventListener('click', () => send('dislike'));
+  refreshCounts();
+  refreshUser();
 }
 
 function animateNumber(el, value, duration = 800) {
@@ -371,6 +453,7 @@ function showTab(name) {
 }
 
 function showGrants(name) {
+  currentResearcher = name;
   const grantsContainer = document.getElementById('grants');
   grantsContainer.innerHTML = '';
 
@@ -382,7 +465,9 @@ function showGrants(name) {
     const reason = typeof g === 'object' ? g.match_reason : null;
     const grant = grantsMap.get(String(id));
     if (!grant) return;
-    grantsContainer.appendChild(createGrantCard(grant, reason));
+    const card = createGrantCard(grant, reason);
+    grantsContainer.appendChild(card);
+    setupVoting(card, grant.grant_id);
   });
 
   grantsContainer.dispatchEvent(
@@ -455,10 +540,44 @@ function initGrantsTable() {
 
 }
 
+function timeAgo(ts) {
+  const diff = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+  if (diff < 60) return `${diff} seconds ago`;
+  const m = Math.floor(diff / 60);
+  if (m < 60) return `${m} minutes ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hours ago`;
+  const d = Math.floor(h / 24);
+  return `${d} days ago`;
+}
+
+async function loadHealth() {
+  const box = document.getElementById('health-widget');
+  if (!box) return;
+  box.textContent = 'Loading...';
+  try {
+    const resp = await fetch(`${API_BASE}/health`);
+    if (!resp.ok) throw resp;
+    const data = await resp.json();
+    box.innerHTML = `<strong>${data.total_votes} total votes</strong> · ${data.unique_grants} grants · ${data.unique_researchers} researchers`+
+      `<br>Top grant #${data.top_grant.grant_id} (👍 ${data.top_grant.likes} / 👎 ${data.top_grant.dislikes})`+
+      `<br>Last vote ${timeAgo(data.last_vote)}`;
+  } catch (err) {
+    if (err.status == 429) box.textContent = 'Slow down';
+    else box.textContent = 'Error loading stats';
+  }
+}
+
+function startHealthPolling() {
+  loadHealth();
+  setInterval(loadHealth, 60000);
+}
+
 async function init() {
   await loadData();
 
   showLandingWizard();
+  startHealthPolling();
 
   document.getElementById('tab-recommendations').addEventListener('click', () => showTab('recommendations'));
   document.getElementById('tab-grants-btn').addEventListener('click', () => showTab('grants'));
