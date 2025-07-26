@@ -6,6 +6,9 @@ let researcherNames = [];
 let providerChart;
 let deadlineChart;
 let grantsTable;
+const API_BASE = "https://ggm-backend.onrender.com";
+let currentResearcher = null;
+
 
 // ---------- Google Analytics event helper ----------
 function track(eventName, params = {}) {
@@ -85,7 +88,9 @@ function updateSuggestions(value) {
 function selectResearcher(name) {
   document.getElementById('researcher-input').value = name;
   document.getElementById('suggestions').style.display = 'none';
+  currentResearcher = name;
   showGrants(name);
+  document.querySelectorAll('.grant').forEach(loadVoteData);
   track('select_researcher', { researcher_name: name });
 }
 
@@ -187,6 +192,28 @@ function createGrantCard(grant, matchReason = null) {
   card.appendChild(btn);
   card.appendChild(summary);
 
+  const voteWrap = document.createElement('div');
+  voteWrap.className = 'vote-box';
+
+  const likeBtn = document.createElement('button');
+  likeBtn.className = 'vote-btn like-btn';
+  likeBtn.innerHTML = `👍 <span class="count">0</span>`;
+
+  const dislikeBtn = document.createElement('button');
+  dislikeBtn.className = 'vote-btn dislike-btn';
+  dislikeBtn.innerHTML = `👎 <span class="count">0</span>`;
+
+  voteWrap.appendChild(likeBtn);
+  voteWrap.appendChild(dislikeBtn);
+  card.appendChild(voteWrap);
+
+  card.dataset.grantId = grant.grant_id;
+
+  likeBtn.addEventListener('click', () => handleVote(card, 'like'));
+  dislikeBtn.addEventListener('click', () => handleVote(card, 'dislike'));
+
+  loadVoteData(card);
+
   return card;
 }
 
@@ -211,6 +238,113 @@ function parseDueDate(raw) {
     [dd, mm, yyyy] = datePart.split('-');
   }
   return new Date(`${yyyy}-${mm}-${dd}T${timePart}Z`);
+}
+
+async function loadVoteData(card) {
+  const id = card.dataset.grantId;
+  try {
+    const resp = await fetch(`${API_BASE}/votes/${id}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      card.querySelector('.like-btn .count').textContent = data.likes ?? 0;
+      card.querySelector('.dislike-btn .count').textContent = data.dislikes ?? 0;
+    }
+    if (currentResearcher) {
+      const vr = await fetch(`${API_BASE}/vote/${id}/${encodeURIComponent(currentResearcher)}`);
+      let action = null;
+      if (vr.ok) {
+        const vdata = await vr.json();
+        action = vdata.action;
+      }
+      setVoteHighlight(card, action);
+    } else {
+      setVoteHighlight(card, null);
+    }
+  } catch (err) {
+    if (err.status === 429) {
+      showMessage(card, 'Slow down');
+    }
+  }
+}
+
+function setVoteHighlight(card, action) {
+  const likeBtn = card.querySelector('.like-btn');
+  const dislikeBtn = card.querySelector('.dislike-btn');
+  likeBtn.classList.toggle('active', action === 'like');
+  dislikeBtn.classList.toggle('active', action === 'dislike');
+  card.dataset.userVote = action || '';
+}
+
+async function handleVote(card, action) {
+  if (!currentResearcher) {
+    alert('Please select your name first.');
+    return;
+  }
+  const id = card.dataset.grantId;
+  const current = card.dataset.userVote;
+  try {
+    if (current === action) {
+      await fetch(`${API_BASE}/vote/${id}/${encodeURIComponent(currentResearcher)}`, { method: 'DELETE' });
+      card.dataset.userVote = '';
+    } else {
+      await fetch(`${API_BASE}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grant_id: id, researcher_id: currentResearcher, action })
+      });
+      card.dataset.userVote = action;
+    }
+    await loadVoteData(card);
+  } catch (err) {
+    if (err.status === 429) {
+      showMessage(card, 'Slow down');
+    }
+  }
+}
+
+function showMessage(card, msg) {
+  let box = card.querySelector('.vote-msg');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'vote-msg';
+    card.appendChild(box);
+  }
+  box.textContent = msg;
+  setTimeout(() => box.remove(), 2000);
+}
+
+function relativeTime(ts) {
+  const diff = Date.now() - new Date(ts).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} minute${mins===1?'':'s'} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hour${hrs===1?'':'s'} ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days} day${days===1?'':'s'} ago`;
+}
+
+async function loadHealth() {
+  const box = document.getElementById('health-widget');
+  if (!box) return;
+  box.textContent = 'Loading...';
+  try {
+    const resp = await fetch(`${API_BASE}/health`);
+    if (!resp.ok) throw resp;
+    const data = await resp.json();
+    box.innerHTML = `
+      <span>${data.total_votes} total votes</span>
+      <span>${data.unique_grants} grants</span>
+      <span>${data.unique_researchers} researchers</span>
+      <span>Top: ${data.top_grant.grant_id} (${data.top_grant.likes}/${data.top_grant.dislikes})</span>
+      <span>Last: ${relativeTime(data.last_vote)}</span>`;
+  } catch (err) {
+    if (err.status === 429) {
+      box.textContent = 'Slow down';
+    } else {
+      box.textContent = 'Error loading stats';
+    }
+  }
 }
 
 function animateNumber(el, value, duration = 800) {
@@ -457,6 +591,9 @@ function initGrantsTable() {
 
 async function init() {
   await loadData();
+
+  loadHealth();
+  setInterval(loadHealth, 60000);
 
   showLandingWizard();
 
