@@ -7,6 +7,9 @@ let providerChart;
 let deadlineChart;
 let grantsTable;
 
+// TODO: replace 'anon' with real user id from auth cookie when available
+const CURRENT_USER = 'anon';
+
 // ---------- Google Analytics event helper ----------
 function track(eventName, params = {}) {
   try {
@@ -141,6 +144,8 @@ function createGrantCard(grant, matchReason = null) {
       <p><strong>Proposed Money:</strong> ${moneyFmt(grant.proposed_money)}</p>
       <p><a href="${grant.submission_link}" target="_blank" rel="noopener">Submission Link ↗</a></p>
     `;
+
+  renderVoteBar(card, grant.grant_id);
 
   // Track outbound submission link clicks
   card.querySelector('a').addEventListener('click', () =>
@@ -482,3 +487,164 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ===== Voting module =====
+const API_BASE = 'https://ggm-backend.onrender.com';
+
+const api = {
+  async fetch(path, options = {}) {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options
+    });
+    if (!res.ok) throw new Error('Network error');
+    return res.json();
+  },
+  summary(id) {
+    return this.fetch(`/votes/summary/${id}`);
+  },
+  userVote(id, user) {
+    return this.fetch(`/votes/user/${id}/${user}`);
+  },
+  post(id, type) {
+    return this.fetch('/vote', {
+      method: 'POST',
+      body: JSON.stringify({ grant_id: id, user: CURRENT_USER, type })
+    });
+  },
+  remove(id) {
+    return this.fetch(`/vote/${id}`, { method: 'DELETE' });
+  }
+};
+
+function updateCount(el, count) {
+  el.textContent = count;
+  el.style.visibility = count ? 'visible' : 'hidden';
+}
+
+function setState(bar, vote) {
+  const likeBtn = bar.querySelector('.like-btn');
+  const dislikeBtn = bar.querySelector('.dislike-btn');
+  likeBtn.classList.toggle('liked', vote === 'like');
+  dislikeBtn.classList.toggle('disliked', vote === 'dislike');
+  likeBtn.setAttribute('aria-pressed', vote === 'like');
+  dislikeBtn.setAttribute('aria-pressed', vote === 'dislike');
+  bar.dataset.vote = vote || '';
+}
+
+function renderVoteBar(cardEl, grantId) {
+  const bar = document.createElement('div');
+  bar.className = 'vote-bar';
+
+  const likeBtn = document.createElement('button');
+  likeBtn.className = 'vote-btn like-btn';
+  likeBtn.setAttribute('data-id', grantId);
+  likeBtn.setAttribute('role', 'button');
+  likeBtn.setAttribute('aria-label', 'Like');
+  likeBtn.setAttribute('aria-pressed', 'false');
+  likeBtn.tabIndex = 0;
+  likeBtn.textContent = '👍';
+
+  const likeCount = document.createElement('span');
+  likeCount.className = 'count';
+
+  const dislikeBtn = document.createElement('button');
+  dislikeBtn.className = 'vote-btn dislike-btn';
+  dislikeBtn.setAttribute('data-id', grantId);
+  dislikeBtn.setAttribute('role', 'button');
+  dislikeBtn.setAttribute('aria-label', 'Dislike');
+  dislikeBtn.setAttribute('aria-pressed', 'false');
+  dislikeBtn.tabIndex = 0;
+  dislikeBtn.textContent = '👎';
+
+  const dislikeCount = document.createElement('span');
+  dislikeCount.className = 'count';
+
+  bar.appendChild(likeBtn);
+  bar.appendChild(likeCount);
+  bar.appendChild(dislikeBtn);
+  bar.appendChild(dislikeCount);
+
+  const insertPoint = cardEl.querySelector('p');
+  cardEl.insertBefore(bar, insertPoint);
+
+  likeBtn.addEventListener('click', handleVoteClick);
+  dislikeBtn.addEventListener('click', handleVoteClick);
+
+  const keyHandler = (ev) => {
+    if (ev.key === ' ' || ev.key === 'Enter') {
+      ev.preventDefault();
+      ev.currentTarget.click();
+    }
+  };
+  likeBtn.addEventListener('keydown', keyHandler);
+  dislikeBtn.addEventListener('keydown', keyHandler);
+
+  Promise.all([
+    api.summary(grantId).catch(() => ({ likes: 0, dislikes: 0 })),
+    api.userVote(grantId, CURRENT_USER).catch(() => ({ vote: null }))
+  ]).then(([sum, user]) => {
+    bar.dataset.likes = sum.likes;
+    bar.dataset.dislikes = sum.dislikes;
+    updateCount(likeCount, sum.likes);
+    updateCount(dislikeCount, sum.dislikes);
+    setState(bar, user.vote);
+  });
+}
+
+async function handleVoteClick(e) {
+  const btn = e.currentTarget;
+  const bar = btn.parentElement;
+  if (bar.dataset.busy) return;
+  bar.dataset.busy = '1';
+  setTimeout(() => delete bar.dataset.busy, 300);
+
+  const isLike = btn.classList.contains('like-btn');
+  const grantId = btn.dataset.id;
+
+  const likeBtn = bar.querySelector('.like-btn');
+  const dislikeBtn = bar.querySelector('.dislike-btn');
+  const likeCountEl = likeBtn.nextElementSibling;
+  const dislikeCountEl = dislikeBtn.nextElementSibling;
+
+  let likes = parseInt(bar.dataset.likes || '0', 10);
+  let dislikes = parseInt(bar.dataset.dislikes || '0', 10);
+  const prevVote = bar.dataset.vote || null;
+  let newVote = null;
+
+  if (isLike) {
+    newVote = prevVote === 'like' ? null : 'like';
+  } else {
+    newVote = prevVote === 'dislike' ? null : 'dislike';
+  }
+
+  const prev = { likes, dislikes, vote: prevVote };
+
+  if (prevVote === 'like') likes--;
+  if (prevVote === 'dislike') dislikes--;
+  if (newVote === 'like') likes++;
+  if (newVote === 'dislike') dislikes++;
+
+  bar.dataset.likes = likes;
+  bar.dataset.dislikes = dislikes;
+  updateCount(likeCountEl, likes);
+  updateCount(dislikeCountEl, dislikes);
+  setState(bar, newVote);
+
+  try {
+    if (!newVote) {
+      await api.remove(grantId);
+      track('vote_remove', { grant_id: grantId });
+    } else {
+      await api.post(grantId, newVote);
+      track(newVote === 'like' ? 'vote_like' : 'vote_dislike', { grant_id: grantId });
+    }
+  } catch (err) {
+    bar.dataset.likes = prev.likes;
+    bar.dataset.dislikes = prev.dislikes;
+    updateCount(likeCountEl, prev.likes);
+    updateCount(dislikeCountEl, prev.dislikes);
+    setState(bar, prev.vote);
+    alert("Couldn't register vote – please try again.");
+  }
+}
