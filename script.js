@@ -6,6 +6,8 @@ let researcherNames = [];
 let providerChart;
 let deadlineChart;
 let grantsTable;
+const API_BASE = 'https://ggm-backend.onrender.com';
+let currentResearcher = '';
 
 // ---------- Google Analytics event helper ----------
 function track(eventName, params = {}) {
@@ -85,6 +87,7 @@ function updateSuggestions(value) {
 function selectResearcher(name) {
   document.getElementById('researcher-input').value = name;
   document.getElementById('suggestions').style.display = 'none';
+  currentResearcher = name;
   showGrants(name);
   track('select_researcher', { researcher_name: name });
 }
@@ -128,6 +131,119 @@ function formatDate(raw) {
 function moneyFmt(m) {
   if (m === null || m === undefined || Number.isNaN(m)) return '';
   return m.toLocaleString();
+}
+
+function timeAgo(ts) {
+  const diffSec = (Date.now() - new Date(ts)) / 1000;
+  if (Number.isNaN(diffSec)) return '';
+  const m = Math.floor(diffSec / 60);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} minute${m === 1 ? '' : 's'} ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hour${h === 1 ? '' : 's'} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+function showRateLimit() {
+  alert('Slow down - too many requests');
+}
+
+async function updateHealthWidget() {
+  const el = document.getElementById('health-widget');
+  if (!el) return;
+  el.textContent = 'Loading...';
+  try {
+    const resp = await fetch(`${API_BASE}/health`);
+    if (resp.status === 429) {
+      el.textContent = 'Slow down';
+      return;
+    }
+    if (!resp.ok) throw new Error('bad');
+    const data = await resp.json();
+    const top = data.top_grant
+      ? `${data.top_grant.grant_id} (${data.top_grant.likes}/${data.top_grant.dislikes})`
+      : 'N/A';
+    el.innerHTML = `<strong>${data.total_votes} total votes</strong> · ${data.unique_grants} grants · ${data.unique_researchers} researchers · Top: ${top} · Last vote: ${timeAgo(data.last_vote)}`;
+  } catch (err) {
+    el.textContent = 'Failed to load stats';
+  }
+}
+
+function initHealthWidget() {
+  updateHealthWidget();
+  setInterval(updateHealthWidget, 60000);
+}
+
+function addVoteUI(card, grantId) {
+  const container = document.createElement('div');
+  container.className = 'vote-buttons';
+
+  const likeBtn = document.createElement('button');
+  likeBtn.className = 'vote-btn like';
+  likeBtn.innerHTML = `👍 <span class="count">0</span>`;
+
+  const dislikeBtn = document.createElement('button');
+  dislikeBtn.className = 'vote-btn dislike';
+  dislikeBtn.innerHTML = `👎 <span class="count">0</span>`;
+
+  container.appendChild(likeBtn);
+  container.appendChild(dislikeBtn);
+  card.appendChild(container);
+
+  async function refresh() {
+    try {
+      const resp = await fetch(`${API_BASE}/votes/${grantId}`);
+      if (resp.ok) {
+        const data = await resp.json();
+        likeBtn.querySelector('.count').textContent = data.likes;
+        dislikeBtn.querySelector('.count').textContent = data.dislikes;
+      }
+    } catch {}
+
+    if (!currentResearcher) return;
+    try {
+      const r = await fetch(`${API_BASE}/vote/${grantId}/${encodeURIComponent(currentResearcher)}`);
+      if (r.ok) {
+        const d = await r.json();
+        setState(d.action);
+      } else {
+        setState('');
+      }
+    } catch {}
+  }
+
+  function setState(action) {
+    likeBtn.classList.remove('active');
+    dislikeBtn.classList.remove('active');
+    if (action === 'like') likeBtn.classList.add('active');
+    else if (action === 'dislike') dislikeBtn.classList.add('active');
+    card.dataset.vote = action || '';
+  }
+
+  async function send(action) {
+    if (!currentResearcher) {
+      alert('Select your name first');
+      return;
+    }
+    if (card.dataset.vote === action) {
+      const del = await fetch(`${API_BASE}/vote/${grantId}/${encodeURIComponent(currentResearcher)}`, { method: 'DELETE' });
+      if (del.status === 429) return showRateLimit();
+    } else {
+      const resp = await fetch(`${API_BASE}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ grant_id: grantId, researcher_id: currentResearcher, action })
+      });
+      if (resp.status === 429) return showRateLimit();
+    }
+    await refresh();
+  }
+
+  likeBtn.addEventListener('click', () => send('like'));
+  dislikeBtn.addEventListener('click', () => send('dislike'));
+
+  refresh();
 }
 
 function createGrantCard(grant, matchReason = null) {
@@ -186,6 +302,8 @@ function createGrantCard(grant, matchReason = null) {
 
   card.appendChild(btn);
   card.appendChild(summary);
+
+  addVoteUI(card, grant.grant_id);
 
   return card;
 }
@@ -457,6 +575,8 @@ function initGrantsTable() {
 
 async function init() {
   await loadData();
+
+  initHealthWidget();
 
   showLandingWizard();
 

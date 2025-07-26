@@ -23,3 +23,13 @@ No build step is required; the site consists only of HTML, CSS and JavaScript fi
 ## Colors
 
 The design uses a white background with deep navy (`#213646`) and vivid cyan (`#1DBEE6`) accents.
+
+## Voting & Health Widget
+
+The site integrates with a backend service to record likes and dislikes for each
+grant. Users can vote on the grants displayed in their recommendations using the
+green **Like** or red **Dislike** buttons. Vote totals update instantly without
+reloading the page.
+
+A small banner at the top of the page shows overall voting statistics fetched
+from the backend. These stats refresh automatically every minute.
